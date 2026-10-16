@@ -30,16 +30,19 @@ jobs:
           PATH: /usr/lib/llvm22/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
         run: |
           just format
-          git diff --binary > /tmp/noctalia-format.patch
+          tar -czf /tmp/noctalia-formatted.tar.gz src/notification/notification_manager.h src/notification/notification_manager.cpp src/shell/control_center/tabs/notifications_tab.cpp tests/notification_action_availability_test.cpp
           just format-check
-          git diff --exit-code
+          git -c safe.directory="$GITHUB_WORKSPACE" --git-dir="$GITHUB_WORKSPACE/.git" --work-tree="$GITHUB_WORKSPACE" diff --binary > /tmp/noctalia-format.patch
+          git -c safe.directory="$GITHUB_WORKSPACE" --git-dir="$GITHUB_WORKSPACE/.git" --work-tree="$GITHUB_WORKSPACE" diff --exit-code
 
       - name: Upload formatting diff
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: noctalia-format
-          path: /tmp/noctalia-format.patch
+          path: |
+            /tmp/noctalia-format.patch
+            /tmp/noctalia-formatted.tar.gz
           retention-days: 3
 
   build:

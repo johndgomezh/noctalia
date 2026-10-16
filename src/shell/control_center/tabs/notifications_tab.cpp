@@ -323,18 +323,15 @@ namespace {
     return revision;
   }
 
-  class NotificationHistoryRow final : public Flex {
+  class NotificationHistoryRow final : public InputArea {
   public:
     explicit NotificationHistoryRow(float scale, float fillOpacity) : m_scale(scale) {
-      applyNotificationCardStyle(*this, scale, fillOpacity);
-      setFillWidth(true);
+      // The input wrapper receives card clicks; descendant buttons keep their own targets.
+      m_card = static_cast<Flex*>(addChild(ui::column({.fillWidth = true})));
+      applyNotificationCardStyle(*m_card, scale, fillOpacity);
+      setEnabled(false);
 
-      // Keep the card's click target behind its independent expand, dismiss and action buttons.
-      m_openArea = static_cast<InputArea*>(addChild(ui::inputArea({})));
-      m_openArea->setParticipatesInLayout(false);
-      m_openArea->setEnabled(false);
-
-      m_header = static_cast<Flex*>(addChild(
+      m_header = static_cast<Flex*>(m_card->addChild(
           ui::row({
               .align = FlexAlign::Center,
               .justify = FlexJustify::SpaceBetween,
@@ -389,14 +386,14 @@ namespace {
       m_expand = static_cast<Button*>(m_headerActions->addChild(makeActionButton("chevron-down", scale)));
       m_dismiss = static_cast<Button*>(m_headerActions->addChild(makeActionButton("trash", scale)));
 
-      m_summary = static_cast<Label*>(addChild(
+      m_summary = static_cast<Label*>(m_card->addChild(
           ui::label({
               .fontSize = Style::fontSizeBody * scale,
               .fontWeight = FontWeight::Bold,
           })
       ));
 
-      m_body = static_cast<Label*>(addChild(
+      m_body = static_cast<Label*>(m_card->addChild(
           ui::label({
               .fontSize = Style::fontSizeBody * scale,
               .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
@@ -404,7 +401,7 @@ namespace {
           })
       ));
 
-      m_actionsRow = static_cast<Flex*>(addChild(
+      m_actionsRow = static_cast<Flex*>(m_card->addChild(
           ui::column({
               .align = FlexAlign::Stretch,
               .gap = Style::spaceXs * scale,
@@ -423,11 +420,10 @@ namespace {
     ) {
       const NotificationCardMetrics metrics =
           measureNotificationCard(renderer, entry, m_scale, width, expanded, actions);
-      setMinWidth(width);
       setSize(width, metrics.height);
 
-      m_openArea->setEnabled(static_cast<bool>(onOpen));
-      m_openArea->setOnClick([onOpen = std::move(onOpen)](const InputArea::PointerData&) {
+      setEnabled(static_cast<bool>(onOpen));
+      setOnClick([onOpen = std::move(onOpen)](const InputArea::PointerData&) {
         if (onOpen) {
           onOpen();
         }
@@ -502,8 +498,8 @@ namespace {
 
   protected:
     void doLayout(Renderer& renderer) override {
-      Flex::doLayout(renderer);
-      m_openArea->setSize(width(), height());
+      m_card->setSize(width(), height());
+      InputArea::doLayout(renderer);
     }
 
   private:
@@ -595,7 +591,7 @@ namespace {
     }
 
     float m_scale = 1.0F;
-    InputArea* m_openArea = nullptr;
+    Flex* m_card = nullptr;
     Flex* m_header = nullptr;
     Flex* m_leftCluster = nullptr;
     Box* m_iconSlot = nullptr;
