@@ -10,12 +10,14 @@ namespace {
 
   uint32_t addNotification(NotificationManager& manager, std::vector<std::string> actions) {
     static unsigned int sequence = 0;
-    return manager.addOrReplace(NotificationRequest{
-        .appName = "action-availability-test",
-        .summary = "notification-" + std::to_string(++sequence),
-        .timeout = 0,
-        .actions = std::move(actions),
-    });
+    return manager.addOrReplace(
+        NotificationRequest{
+            .appName = "action-availability-test",
+            .summary = "notification-" + std::to_string(++sequence),
+            .timeout = 0,
+            .actions = std::move(actions),
+        }
+    );
   }
 
   void checkLiveAndExpiredActions() {
@@ -86,13 +88,18 @@ namespace {
 
     const uint32_t replaced = addNotification(manager, {"default", "Open"});
     TEST_CHECK(manager.canInvokeAction(replaced, "default"));
-    TEST_CHECK(manager.addOrReplace(NotificationRequest{
-        .replacesId = replaced,
-        .appName = "action-availability-test",
-        .summary = "updated",
-        .timeout = 0,
-        .actions = {"archive", "Archive"},
-    }) == replaced);
+    TEST_CHECK(
+        manager.addOrReplace(
+            NotificationRequest{
+                .replacesId = replaced,
+                .appName = "action-availability-test",
+                .summary = "updated",
+                .timeout = 0,
+                .actions = {"archive", "Archive"},
+            }
+        )
+        == replaced
+    );
     TEST_CHECK(!manager.canInvokeAction(replaced, "default"));
     TEST_CHECK(manager.canInvokeAction(replaced, "archive"));
   }

@@ -526,7 +526,9 @@ const Notification* NotificationManager::findInvokable(uint32_t id) const {
 
 const Notification* NotificationManager::findInvokableAction(uint32_t id, std::string_view actionKey) const {
   const Notification* notification = findInvokable(id);
-  if (notification == nullptr || actionKey.empty() || actionKey == kInlineReplyAction
+  if (notification == nullptr
+      || actionKey.empty()
+      || actionKey == kInlineReplyAction
       || !notificationHasAction(*notification, actionKey)) {
     return nullptr;
   }

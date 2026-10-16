@@ -52,9 +52,8 @@ namespace {
   }
   constexpr float kNotificationActionButtonSize = Style::controlHeightSm;
 
-  std::vector<std::string> availableHistoryActions(
-      const NotificationManager* notifications, const Notification& notification
-  ) {
+  std::vector<std::string>
+  availableHistoryActions(const NotificationManager* notifications, const Notification& notification) {
     std::vector<std::string> actions;
     if (notifications == nullptr) {
       return actions;
@@ -413,10 +412,9 @@ namespace {
 
     void bind(
         Renderer& renderer, const NotificationHistoryEntry& entry, float width, bool expanded,
-        const std::vector<std::string>& actions,
-        IconResolver& iconResolver, std::function<void(uint32_t)> onToggleExpanded,
-        std::function<void(uint32_t, bool)> onRemove, const std::function<void(uint32_t, const std::string&)>& onAction,
-        std::function<void()> onOpen
+        const std::vector<std::string>& actions, IconResolver& iconResolver,
+        std::function<void(uint32_t)> onToggleExpanded, std::function<void(uint32_t, bool)> onRemove,
+        const std::function<void(uint32_t, const std::string&)>& onAction, std::function<void()> onOpen
     ) {
       const NotificationCardMetrics metrics =
           measureNotificationCard(renderer, entry, m_scale, width, expanded, actions);
@@ -665,8 +663,8 @@ public:
       onOpen = [this, id = entry.notification.id]() { m_owner.invokeNotificationAction(id, "default"); };
     }
     row->bind(
-        renderer, entry, width, m_owner.m_expandedIds.contains(entry.notification.id), actions,
-        m_owner.m_iconResolver, [this](uint32_t id) { m_owner.toggleNotificationExpanded(id); },
+        renderer, entry, width, m_owner.m_expandedIds.contains(entry.notification.id), actions, m_owner.m_iconResolver,
+        [this](uint32_t id) { m_owner.toggleNotificationExpanded(id); },
         [this](uint32_t id, bool active) { m_owner.removeNotificationEntry(id, active); },
         [this](uint32_t id, const std::string& key) { m_owner.invokeNotificationAction(id, key); }, std::move(onOpen)
     );
