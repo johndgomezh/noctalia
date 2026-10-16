@@ -1,0 +1,81 @@
+name: Notification contribution validation
+
+on:
+  push:
+    branches: [ci/notification-history-actions]
+
+permissions:
+  contents: read
+
+# Cancel in-progress runs for the same branch/PR when new commits land.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    name: clang-format
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install tools
+        run: |
+          pacman -Syu --noconfirm --needed git just clang22
+
+      - uses: actions/checkout@v6
+
+      - name: Check formatting
+        env:
+          PATH: /usr/lib/llvm22/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        run: |
+          just format
+          git diff --binary > /tmp/noctalia-format.patch
+          just format-check
+          git diff --exit-code
+
+      - name: Upload formatting diff
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: noctalia-format
+          path: /tmp/noctalia-format.patch
+          retention-days: 3
+
+  build:
+    name: Build (debug)
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel git meson ninja pkgconf \
+            wayland wayland-protocols \
+            libglvnd freetype2 fontconfig noto-fonts \
+            cairo pango harfbuzz \
+            libxkbcommon glib2 \
+            libsecret libsodium \
+            sdbus-cpp libpipewire wireplumber polkit \
+            pam curl libwebp libjxl libsndfile librsvg \
+            libqalculate libxml2 \
+            md4c tomlplusplus libical \
+            nlohmann-json stb \
+            jemalloc just clang
+
+      - uses: actions/checkout@v6
+
+      - name: Build
+        run: just build
+
+      - name: Test
+        run: just test debug --print-errorlogs
+
+      - name: Lint
+        run: |
+          meson compile -C build-debug wayland-protocol-headers
+          clang-tidy -p build-debug --warnings-as-errors='*' \
+            src/notification/notification_manager.cpp \
+            src/shell/control_center/tabs/notifications_tab.cpp \
+            tests/notification_action_availability_test.cpp
