@@ -1,6 +1,7 @@
 #include "shell/control_center/tabs/notifications_tab.h"
 
 #include "compositors/compositor_platform.h"
+#include "core/deferred_call.h"
 #include "core/log.h"
 #include "i18n/i18n.h"
 #include "net/uri.h"
@@ -10,6 +11,7 @@
 #include "render/animation/animation.h"
 #include "render/core/renderer.h"
 #include "render/core/texture_manager.h"
+#include "render/scene/input_area.h"
 #include "shell/control_center/control_center_panel.h"
 #include "shell/panel/panel_button_style.h"
 #include "shell/panel/panel_manager.h"
@@ -49,6 +51,23 @@ namespace {
     return std::min(iconSize * 0.5F, Style::scaledRadius(baseRadius, localScale));
   }
   constexpr float kNotificationActionButtonSize = Style::controlHeightSm;
+
+  std::vector<std::string> availableHistoryActions(
+      const NotificationManager* notifications, const Notification& notification
+  ) {
+    std::vector<std::string> actions;
+    if (notifications == nullptr) {
+      return actions;
+    }
+    const std::size_t limit = std::min(notification.actions.size(), kMaxNotificationActions * 2);
+    for (std::size_t i = 0; i + 1 < limit; i += 2) {
+      if (notifications->canInvokeAction(notification.id, notification.actions[i])) {
+        actions.push_back(notification.actions[i]);
+        actions.push_back(notification.actions[i + 1]);
+      }
+    }
+    return actions;
+  }
 
   std::string historyActionLabel(std::string_view actionKey, std::string_view actionLabel) {
     if (!StringUtils::isBlank(actionLabel)) {
@@ -225,7 +244,7 @@ namespace {
 
   NotificationCardMetrics measureNotificationCard(
       Renderer& renderer, const NotificationHistoryEntry& entry, float scale, float width, bool expandedRequested,
-      bool showHistoryActions
+      const std::vector<std::string>& actions
   ) {
     NotificationCardMetrics metrics;
     const float cardWidth = std::max(0.0F, width);
@@ -276,9 +295,7 @@ namespace {
               metrics.expanded ? kExpandedMaxLines : kBodyMaxLines
           );
 
-    const float actionsRowHeight = showHistoryActions
-        ? measureHistoryActionsRowHeight(renderer, entry.notification.actions, metrics.cardTextWidth, scale)
-        : 0.0F;
+    const float actionsRowHeight = measureHistoryActionsRowHeight(renderer, actions, metrics.cardTextWidth, scale);
 
     const float paddingY = (Style::spaceSm + Style::spaceXs) * scale * 2.0F;
     int visibleSegments = 2;
@@ -311,6 +328,11 @@ namespace {
     explicit NotificationHistoryRow(float scale, float fillOpacity) : m_scale(scale) {
       applyNotificationCardStyle(*this, scale, fillOpacity);
       setFillWidth(true);
+
+      // Keep the card's click target behind its independent expand, dismiss and action buttons.
+      m_openArea = static_cast<InputArea*>(addChild(ui::inputArea({})));
+      m_openArea->setParticipatesInLayout(false);
+      m_openArea->setEnabled(false);
 
       m_header = static_cast<Flex*>(addChild(
           ui::row({
@@ -393,14 +415,23 @@ namespace {
     }
 
     void bind(
-        Renderer& renderer, const NotificationHistoryEntry& entry, float width, bool expanded, bool showHistoryActions,
+        Renderer& renderer, const NotificationHistoryEntry& entry, float width, bool expanded,
+        const std::vector<std::string>& actions,
         IconResolver& iconResolver, std::function<void(uint32_t)> onToggleExpanded,
-        std::function<void(uint32_t, bool)> onRemove, const std::function<void(uint32_t, const std::string&)>& onAction
+        std::function<void(uint32_t, bool)> onRemove, const std::function<void(uint32_t, const std::string&)>& onAction,
+        std::function<void()> onOpen
     ) {
       const NotificationCardMetrics metrics =
-          measureNotificationCard(renderer, entry, m_scale, width, expanded, showHistoryActions);
+          measureNotificationCard(renderer, entry, m_scale, width, expanded, actions);
       setMinWidth(width);
       setSize(width, metrics.height);
+
+      m_openArea->setEnabled(static_cast<bool>(onOpen));
+      m_openArea->setOnClick([onOpen = std::move(onOpen)](const InputArea::PointerData&) {
+        if (onOpen) {
+          onOpen();
+        }
+      });
 
       const float iconPx = kHistoryIconSize * m_scale;
       m_iconSlot->setSize(iconPx, iconPx);
@@ -443,16 +474,16 @@ namespace {
         m_actionsRow->removeChild(m_actionsRow->children().back().get());
       }
       m_actionsRow->setVisible(false);
-      if (showHistoryActions && !entry.notification.actions.empty()) {
+      if (!actions.empty()) {
         std::vector<std::unique_ptr<Button>> buttons;
-        const std::size_t limit = std::min(entry.notification.actions.size(), kMaxNotificationActions * 2);
+        const std::size_t limit = std::min(actions.size(), kMaxNotificationActions * 2);
         for (std::size_t i = 0; i + 1 < limit; i += 2) {
-          const std::string& actionKey = entry.notification.actions[i];
+          const std::string& actionKey = actions[i];
           if (actionKey.empty()) {
             continue;
           }
           auto button = ui::button({
-              .text = historyActionLabel(actionKey, entry.notification.actions[i + 1]),
+              .text = historyActionLabel(actionKey, actions[i + 1]),
               .fontSize = Style::fontSizeCaption * m_scale,
               .variant = ButtonVariant::Default,
           });
@@ -467,6 +498,12 @@ namespace {
 
         m_actionsRow->setVisible(!m_actionsRow->children().empty());
       }
+    }
+
+  protected:
+    void doLayout(Renderer& renderer) override {
+      Flex::doLayout(renderer);
+      m_openArea->setSize(width(), height());
     }
 
   private:
@@ -558,6 +595,7 @@ namespace {
     }
 
     float m_scale = 1.0F;
+    InputArea* m_openArea = nullptr;
     Flex* m_header = nullptr;
     Flex* m_leftCluster = nullptr;
     Box* m_iconSlot = nullptr;
@@ -607,9 +645,8 @@ public:
     }
     const auto& entry = *m_owner.m_filtered[index];
     const bool expanded = m_owner.m_expandedIds.contains(entry.notification.id);
-    const bool showHistoryActions =
-        m_owner.m_notifications != nullptr && m_owner.m_notifications->hasPendingDBusClose(entry.notification.id);
-    return measureNotificationCard(renderer, entry, m_scale, width, expanded, showHistoryActions).height;
+    const auto actions = availableHistoryActions(m_owner.m_notifications, entry.notification);
+    return measureNotificationCard(renderer, entry, m_scale, width, expanded, actions).height;
   }
 
   [[nodiscard]] std::unique_ptr<Node> createItem() override {
@@ -625,13 +662,17 @@ public:
       return;
     }
     const auto& entry = *m_owner.m_filtered[index];
-    const bool showHistoryActions =
-        m_owner.m_notifications != nullptr && m_owner.m_notifications->hasPendingDBusClose(entry.notification.id);
+    const auto actions = availableHistoryActions(m_owner.m_notifications, entry.notification);
+    std::function<void()> onOpen;
+    if (m_owner.m_notifications != nullptr
+        && m_owner.m_notifications->canInvokeAction(entry.notification.id, "default")) {
+      onOpen = [this, id = entry.notification.id]() { m_owner.invokeNotificationAction(id, "default"); };
+    }
     row->bind(
-        renderer, entry, width, m_owner.m_expandedIds.contains(entry.notification.id), showHistoryActions,
+        renderer, entry, width, m_owner.m_expandedIds.contains(entry.notification.id), actions,
         m_owner.m_iconResolver, [this](uint32_t id) { m_owner.toggleNotificationExpanded(id); },
         [this](uint32_t id, bool active) { m_owner.removeNotificationEntry(id, active); },
-        [this](uint32_t id, const std::string& key) { m_owner.invokeNotificationAction(id, key); }
+        [this](uint32_t id, const std::string& key) { m_owner.invokeNotificationAction(id, key); }, std::move(onOpen)
     );
   }
 
@@ -1005,7 +1046,7 @@ void NotificationsTab::toggleNotificationExpanded(uint32_t id) {
 }
 
 void NotificationsTab::invokeNotificationAction(uint32_t id, const std::string& actionKey) {
-  if (m_notifications == nullptr || actionKey.empty() || !m_notifications->hasPendingDBusClose(id)) {
+  if (m_notifications == nullptr || !m_notifications->canInvokeAction(id, actionKey)) {
     return;
   }
   const std::string activationToken =
@@ -1016,12 +1057,17 @@ void NotificationsTab::invokeNotificationAction(uint32_t id, const std::string& 
   }
 
   m_lastSerial = 0;
+  if (actionKey == "default") {
+    // Closing destroys the click target, so wait until input dispatch has returned.
+    DeferredCall::callLater([]() {
+      if (PanelManager::instance().isOpenPanel("control-center")) {
+        PanelManager::instance().close();
+      }
+    });
+    return;
+  }
   if (m_list != nullptr) {
-    if (const auto index = filteredIndexForId(id); index.has_value()) {
-      m_list->notifyItemChanged(*index);
-    } else {
-      m_list->notifyDataChanged();
-    }
+    m_list->notifyDataChanged();
   }
   PanelManager::instance().refresh();
 }
